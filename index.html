@@ -89,20 +89,6 @@
         }
         .options-row label { margin-right: 15px; cursor: pointer; }
         
-        .target-size {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .size-slider { width: 300px; }
-        .size-input {
-            width: 60px;
-            padding: 3px 5px;
-            border: 1px solid #ccc;
-            border-radius: 3px;
-            font-size: 13px;
-        }
-        
         .btn-start {
             display: block;
             margin: 0 auto 15px;
@@ -159,6 +145,7 @@
         .log-red { color: #f47c7c; }
         .log-yellow { color: #e5c07b; }
         .log-cyan { color: #56b6c2; }
+        .log-magenta { color: #c678dd; }
         
         input[type="file"] { display: none; }
     </style>
@@ -310,19 +297,24 @@
             log(`输出格式：${format}    压缩模式：${mode}`, 'cyan');
             log(`输出目录：浏览器下载目录\n`, 'yellow');
 
-            let ok = 0, fail = 0;
+            let ok = 0, fail = 0, skipped = 0;
 
             for (let i = 0; i < selectedFiles.length; i++) {
                 const file = selectedFiles[i];
                 log(`[${i + 1}/${selectedFiles.length}] 正在处理: ${file.name}`);
 
                 try {
-                    const result = await compressImage(file, targetKB, format, mode);
-                    ok++;
-                    const ratio = ((1 - result.compressedSize / file.size) * 100).toFixed(1);
-                    const tag = result.compressedSize <= targetKB * 1024 ? 'green' : 'yellow';
-                    log(`[OK] ${file.name}  ${formatSize(file.size)} → ${formatSize(result.compressedSize)}  压缩率 ${ratio}%`, tag);
-                    downloadFile(result.blob, result.fileName);
+                    if (file.size / 1024 <= targetKB) {
+                        log(`[跳过] ${file.name} 已满足目标大小（${formatSize(file.size)}）`, 'yellow');
+                        skipped++;
+                    } else {
+                        const result = await compressImage(file, targetKB, format, mode);
+                        ok++;
+                        const ratio = ((1 - result.compressedSize / file.size) * 100).toFixed(1);
+                        const tag = result.compressedSize <= targetKB * 1024 ? 'green' : 'yellow';
+                        log(`[OK] ${file.name}  ${formatSize(file.size)} → ${formatSize(result.compressedSize)}  压缩率 ${ratio}%  (质量: ${result.quality})`, tag);
+                        downloadFile(result.blob, result.fileName);
+                    }
                 } catch (error) {
                     fail++;
                     log(`[失败] ${file.name}  ${error.message}`, 'red');
@@ -331,95 +323,163 @@
                 updateProgress(((i + 1) / selectedFiles.length) * 100);
             }
 
-            log(`\n完成！成功 ${ok} 张，失败 ${fail} 张。`, 'yellow');
+            log(`\n完成！成功 ${ok} 张，失败 ${fail} 张，跳过 ${skipped} 张。`, 'yellow');
             btnStart.disabled = false;
             btnStart.textContent = '开始压缩';
         }
 
-        function compressImage(file, targetKB, format, mode) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                
-                reader.onload = (e) => {
-                    const img = new Image();
-                    img.src = e.target.result;
-                    
-                    img.onload = () => {
-                        // 确定输出格式
-                        let mimeType = 'image/jpeg';
-                        let ext = '.jpg';
-                        
-                        if (format === 'auto') {
-                            const originalExt = '.' + file.name.split('.').pop().toLowerCase();
-                            if (originalExt === '.png') {
-                                mimeType = 'image/png';
-                                ext = '.png';
-                            } else if (originalExt === '.webp') {
-                                mimeType = 'image/webp';
-                                ext = '.webp';
-                            }
-                        } else if (format === 'png') {
-                            mimeType = 'image/png';
-                            ext = '.png';
-                        } else if (format === 'webp') {
-                            mimeType = 'image/webp';
-                            ext = '.webp';
-                        }
-                        
-                        // PNG不支持quality，强制转JPEG
-                        if (mimeType === 'image/png') {
-                            mimeType = 'image/jpeg';
-                            ext = '.jpg';
-                        }
-                        
-                        const canvas = document.createElement('canvas');
-                        canvas.width = img.width;
-                        canvas.height = img.height;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0);
-                        
-                        // 确定初始质量
-                        let quality = 0.75;
-                        if (mode === 'clarity') quality = 0.85;
-                        else if (mode === 'size') quality = 0.6;
-                        
-                        const targetBytes = targetKB * 1024;
-                        const fileName = file.name.replace(/\.[^.]+$/, '') + '_compressed' + ext;
-                        
-                        // 简单循环尝试不同质量
-                        function tryQuality(q) {
-                            canvas.toBlob((blob) => {
-                                if (!blob) {
-                                    reject(new Error('压缩失败'));
-                                    return;
-                                }
-                                
-                                // 如果满足要求，或者质量已经很低，就返回
-                                if (blob.size <= targetBytes || q <= 0.1) {
-                                    resolve({
-                                        blob: blob,
-                                        compressedSize: blob.size,
-                                        fileName: fileName
-                                    });
-                                } else {
-                                    // 否则降低质量继续
-                                    tryQuality(q - 0.05);
-                                }
-                            }, mimeType, q);
-                        }
-                        
-                        tryQuality(quality);
-                    };
-                    
-                    img.onerror = () => reject(new Error('图片加载失败'));
-                };
-                
-                reader.onerror = () => reject(new Error('文件读取失败'));
+        // 将 canvas.toBlob 转换为 Promise
+        function canvasToBlob(canvas, mimeType, quality) {
+            return new Promise((resolve) => {
+                canvas.toBlob((blob) => {
+                    resolve(blob);
+                }, mimeType, quality);
             });
         }
 
+        async function compressImage(file, targetKB, format, mode) {
+            // 1. 读取文件并创建图片
+            const img = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.src = e.target.result;
+                    img.onload = () => resolve(img);
+                    img.onerror = () => reject(new Error('图片加载失败'));
+                };
+                reader.onerror = () => reject(new Error('文件读取失败'));
+            });
+
+            // 2. 确定输出格式
+            let mimeType = 'image/jpeg';
+            let ext = '.jpg';
+
+            if (format === 'auto') {
+                const originalExt = '.' + file.name.split('.').pop().toLowerCase();
+                if (originalExt === '.png' || originalExt === '.bmp') {
+                    mimeType = 'image/jpeg';
+                    ext = '.jpg';
+                } else if (originalExt === '.webp') {
+                    mimeType = 'image/webp';
+                    ext = '.webp';
+                }
+            } else if (format === 'png') {
+                mimeType = 'image/png';
+                ext = '.png';
+            } else if (format === 'webp') {
+                mimeType = 'image/webp';
+                ext = '.webp';
+            }
+
+            // 3. 创建 canvas 并绘制
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+
+            const targetBytes = targetKB * 1024;
+            const fileName = file.name.replace(/\.[^.]+$/, '') + '_compressed' + ext;
+
+            log(`  开始压缩：${formatSize(file.size)} → 目标 ${targetKB} KB`, 'magenta');
+            log(`  [格式] ${ext}, MIME: ${mimeType}`, 'cyan');
+
+            // 4. PNG 格式特殊处理（无损压缩，不支持 quality 参数）
+            if (mimeType === 'image/png') {
+                log(`  ⚠️ PNG格式为无损压缩，无法有效减小文件大小`, 'yellow');
+                log(`  💡 提示：如需压缩文件大小，请选择 JPG 或 WebP 格式`, 'cyan');
+                
+                const blob = await canvasToBlob(canvas, mimeType, 1.0);
+                
+                if (!blob) {
+                    throw new Error('PNG压缩失败');
+                }
+                
+                log(`  ✓ PNG处理完成，大小 ${formatSize(blob.size)}`, 'green');
+                return {
+                    blob: blob,
+                    compressedSize: blob.size,
+                    fileName: fileName,
+                    quality: '无损'
+                };
+            }
+
+            // 5. JPG/WebP 格式支持 quality 参数，进行质量搜索
+            let currentQuality = (mode === 'size') ? 0.7 : 0.95;
+            let blob = await canvasToBlob(canvas, mimeType, currentQuality);
+            
+            if (!blob) {
+                throw new Error('压缩失败：无法创建 blob');
+            }
+
+            log(`  质量 ${currentQuality.toFixed(2)} → ${(blob.size / 1024).toFixed(1)} KB`, 'magenta');
+
+            let bestBlob = null;
+            let bestQuality = currentQuality;
+
+            if (blob.size <= targetBytes) {
+                // 起始质量已满足要求，尝试更高质量（但不超过 0.95）
+                bestBlob = blob;
+                bestQuality = currentQuality;
+                
+                // 逐步增加质量，找到满足要求的最高值
+                while (currentQuality < 0.95) {
+                    currentQuality = Math.min(currentQuality + 0.05, 0.95);
+                    const testBlob = await canvasToBlob(canvas, mimeType, currentQuality);
+                    if (!testBlob || testBlob.size > targetBytes) {
+                        break;
+                    }
+                    bestBlob = testBlob;
+                    bestQuality = currentQuality;
+                    log(`  质量 ${currentQuality.toFixed(2)} → ${(testBlob.size / 1024).toFixed(1)} KB ✓`, 'magenta');
+                }
+            } else {
+                // 起始质量不满足，需要降低质量
+                while (currentQuality > 0.1) {
+                    currentQuality -= 0.05;
+                    if (currentQuality < 0.1) currentQuality = 0.1;
+                    
+                    blob = await canvasToBlob(canvas, mimeType, currentQuality);
+                    if (!blob) continue;
+                    
+                    log(`  质量 ${currentQuality.toFixed(2)} → ${(blob.size / 1024).toFixed(1)} KB`, 'magenta');
+                    
+                    if (blob.size <= targetBytes) {
+                        bestBlob = blob;
+                        bestQuality = currentQuality;
+                        break;
+                    }
+                }
+            }
+
+            // 6. 返回结果
+            if (bestBlob) {
+                log(`  ✓ 最终质量 ${bestQuality.toFixed(2)}，大小 ${formatSize(bestBlob.size)}`, 'green');
+                return {
+                    blob: bestBlob,
+                    compressedSize: bestBlob.size,
+                    fileName: fileName,
+                    quality: bestQuality.toFixed(2)
+                };
+            } else {
+                // 使用最低质量
+                blob = await canvasToBlob(canvas, mimeType, 0.1);
+                if (!blob) {
+                    throw new Error('压缩失败');
+                }
+                log(`  ✓ 使用最低质量 0.10，大小 ${formatSize(blob.size)}`, 'green');
+                return {
+                    blob: blob,
+                    compressedSize: blob.size,
+                    fileName: fileName,
+                    quality: '0.10'
+                };
+            }
+        }
+
         function downloadFile(blob, fileName) {
+            log(`  [下载] ${fileName} (${formatSize(blob.size)})`, 'cyan');
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
