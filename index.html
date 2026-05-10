@@ -2,8 +2,8 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>图片压缩工具 - 网页版</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>图片压缩工具</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -148,6 +148,140 @@
         .log-magenta { color: #c678dd; }
         
         input[type="file"] { display: none; }
+
+        /* ========== 手机适配（仅移动端） ========== */
+        @media screen and (max-width: 600px) {
+            body {
+                padding: 0;
+                background: white;
+            }
+            .container {
+                border-radius: 0;
+                box-shadow: none;
+            }
+            .header {
+                padding: 15px;
+                font-size: 16px;
+                height: auto;
+                min-height: 50px;
+            }
+            .main-content {
+                padding: 15px;
+            }
+
+            /* 模式选择 */
+            .mode-select {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .mode-select label {
+                margin-right: 0;
+                padding: 10px;
+                background: #f5f5f5;
+                border-radius: 6px;
+            }
+
+            /* 路径选择 */
+            .path-section {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+            .path-label {
+                width: auto;
+            }
+            .path-input {
+                width: 100%;
+                padding: 12px;
+                font-size: 14px;
+                box-sizing: border-box;
+            }
+            .btn-browse {
+                width: 100%;
+                padding: 12px;
+                margin-left: 0;
+                font-size: 14px;
+                background: #4a90e2;
+                color: white;
+            }
+
+            /* 选项区域 */
+            .options-section {
+                display: flex;
+                flex-direction: column;
+                gap: 15px;
+            }
+            .options-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .options-row label {
+                flex: 1;
+                min-width: 45%;
+                padding: 8px 5px;
+                text-align: center;
+                background: #f5f5f5;
+                border-radius: 5px;
+                margin-right: 0;
+            }
+            input[type="radio"] {
+                margin-right: 5px;
+                transform: scale(1.2);
+            }
+
+            /* 目标大小 */
+            .target-size {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+            .target-size .size-slider {
+                width: 100%;
+                height: 30px;
+                -webkit-appearance: none;
+                background: #ddd;
+                border-radius: 15px;
+            }
+            .target-size .size-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                width: 28px;
+                height: 28px;
+                background: #4a90e2;
+                border-radius: 50%;
+            }
+            .target-size .size-input {
+                width: 80px;
+                padding: 10px;
+                font-size: 16px;
+                text-align: center;
+                display: block;
+                margin: 0 auto;
+            }
+
+            /* 开始按钮 */
+            .btn-start {
+                width: 100%;
+                padding: 15px;
+                font-size: 16px;
+                border-radius: 8px;
+            }
+
+            /* 进度条 */
+            .progress-bar {
+                height: 25px;
+            }
+            .progress-fill {
+                font-size: 13px;
+            }
+
+            /* 日志区域 */
+            .log-frame {
+                height: 200px;
+                font-size: 11px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -163,8 +297,8 @@
                 <span class="path-label">输入路径:</span>
                 <input type="text" class="path-input" id="inputPath" readonly placeholder="请选择文件或文件夹">
                 <button class="btn-browse" onclick="browseInput()">浏览</button>
-                <input type="file" id="fileInput" onchange="handleFileSelect(this)">
-                <input type="file" id="folderInput" webkitdirectory onchange="handleFolderSelect(this)">
+                <input type="file" id="fileInput" accept="image/*" onchange="handleFileSelect(this)">
+                <input type="file" id="folderInput" webkitdirectory multiple onchange="handleFolderSelect(this)">
             </div>
 
             <div class="preview-frame">
@@ -328,7 +462,6 @@
             btnStart.textContent = '开始压缩';
         }
 
-        // 将 canvas.toBlob 转换为 Promise
         function canvasToBlob(canvas, mimeType, quality) {
             return new Promise((resolve) => {
                 canvas.toBlob((blob) => {
@@ -338,7 +471,6 @@
         }
 
         async function compressImage(file, targetKB, format, mode) {
-            // 1. 读取文件并创建图片
             const img = await new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.readAsDataURL(file);
@@ -351,7 +483,6 @@
                 reader.onerror = () => reject(new Error('文件读取失败'));
             });
 
-            // 2. 确定输出格式
             let mimeType = 'image/jpeg';
             let ext = '.jpg';
 
@@ -372,7 +503,6 @@
                 ext = '.webp';
             }
 
-            // 3. 创建 canvas 并绘制
             const canvas = document.createElement('canvas');
             canvas.width = img.width;
             canvas.height = img.height;
@@ -385,7 +515,6 @@
             log(`  开始压缩：${formatSize(file.size)} → 目标 ${targetKB} KB`, 'magenta');
             log(`  [格式] ${ext}, MIME: ${mimeType}`, 'cyan');
 
-            // 4. PNG 格式特殊处理（无损压缩，不支持 quality 参数）
             if (mimeType === 'image/png') {
                 log(`  ⚠️ PNG格式为无损压缩，无法有效减小文件大小`, 'yellow');
                 log(`  💡 提示：如需压缩文件大小，请选择 JPG 或 WebP 格式`, 'cyan');
@@ -405,7 +534,6 @@
                 };
             }
 
-            // 5. JPG/WebP 格式支持 quality 参数，进行质量搜索
             let currentQuality = (mode === 'size') ? 0.7 : 0.95;
             let blob = await canvasToBlob(canvas, mimeType, currentQuality);
             
@@ -419,11 +547,9 @@
             let bestQuality = currentQuality;
 
             if (blob.size <= targetBytes) {
-                // 起始质量已满足要求，尝试更高质量（但不超过 0.95）
                 bestBlob = blob;
                 bestQuality = currentQuality;
                 
-                // 逐步增加质量，找到满足要求的最高值
                 while (currentQuality < 0.95) {
                     currentQuality = Math.min(currentQuality + 0.05, 0.95);
                     const testBlob = await canvasToBlob(canvas, mimeType, currentQuality);
@@ -435,7 +561,6 @@
                     log(`  质量 ${currentQuality.toFixed(2)} → ${(testBlob.size / 1024).toFixed(1)} KB ✓`, 'magenta');
                 }
             } else {
-                // 起始质量不满足，需要降低质量
                 while (currentQuality > 0.1) {
                     currentQuality -= 0.05;
                     if (currentQuality < 0.1) currentQuality = 0.1;
@@ -453,7 +578,6 @@
                 }
             }
 
-            // 6. 返回结果
             if (bestBlob) {
                 log(`  ✓ 最终质量 ${bestQuality.toFixed(2)}，大小 ${formatSize(bestBlob.size)}`, 'green');
                 return {
@@ -463,7 +587,6 @@
                     quality: bestQuality.toFixed(2)
                 };
             } else {
-                // 使用最低质量
                 blob = await canvasToBlob(canvas, mimeType, 0.1);
                 if (!blob) {
                     throw new Error('压缩失败');
